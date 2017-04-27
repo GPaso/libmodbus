@@ -1008,7 +1008,78 @@ int modbus_reply(modbus_t *ctx, const uint8_t *req,
         }
     }
         break;
+    case MODBUS_FC_READ_FILE_RECORD: {
+        address = (req[offset + 3] << 8) + req[offset + 4];
+        int mapping_address = address - mb_mapping->start_files;
+        uint16_t record_addr = (req[offset + 5] << 8) + req[offset + 6];
+        uint16_t record_len = (req[offset + 7] << 8) + req[offset + 8];
 
+        if (address < 1 || mapping_address < 0 || mapping_address > mb_mapping->nb_files) {
+            rsp_length = response_exception(
+                ctx, &sft, MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS, rsp, FALSE,
+                "Illegal file number %d in read_file_record\n", address);
+        } else if (record_addr > MODBUS_MAX_FILE_RECORD_NUMBER ||
+                   record_addr >= mb_mapping->files[mapping_address].nb_records ||
+                   record_len >= mb_mapping->files[mapping_address].record_size) {
+            rsp_length = response_exception(
+                ctx, &sft, MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE, rsp, TRUE,
+                "Illegal record %d, len 0x%0X (max %d) in read_file_record\n",
+                record_addr, record_len, mb_mapping->files[mapping_address].nb_records);
+        } else {
+            int i;
+
+            rsp_length = ctx->backend->build_response_basis(&sft, rsp);
+            rsp[rsp_length++] = record_len * 2 + 2; // data len
+            rsp[rsp_length++] = record_len * 2 + 1; // file resp len
+            rsp[rsp_length++] = 6; // reference type
+            for (i = 0; i < record_len; i++) {
+                rsp[rsp_length++] = mb_mapping->files[mapping_address].records[record_addr][i] >> 8;
+                rsp[rsp_length++] = mb_mapping->files[mapping_address].records[record_addr][i] & 0xFF;
+            }
+        }
+    }
+        break;
+    case MODBUS_FC_WRITE_FILE_RECORD: {
+        address = (req[offset + 3] << 8) + req[offset + 4];
+        int mapping_address = address - mb_mapping->start_files;
+        uint16_t record_addr = (req[offset + 5] << 8) + req[offset + 6];
+        uint16_t record_len = (req[offset + 7] << 8) + req[offset + 8];
+
+        if (address < 1 || mapping_address < 0 || mapping_address > mb_mapping->nb_files) {
+            rsp_length = response_exception(
+                ctx, &sft, MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS, rsp, FALSE,
+                "Illegal file number %d in read_file_record\n", address);
+        } else if (record_addr > MODBUS_MAX_FILE_RECORD_NUMBER ||
+                   record_addr >= mb_mapping->files[mapping_address].nb_records ||
+                   record_len >= mb_mapping->files[mapping_address].record_size) {
+            rsp_length = response_exception(
+                ctx, &sft, MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE, rsp, TRUE,
+                "Illegal record %d, len 0x%0X (max %d) in read_file_record\n",
+                record_addr, record_len, mb_mapping->files[mapping_address].nb_records);
+        } else {
+            int i;
+
+            for (i = 0; i < record_len; i++) {
+                mb_mapping->files[mapping_address].records[record_addr][i] = (req[offset + 9 + (i *2)] << 8) |
+                                                                             (req[offset + 10 + (i *2)] & 0xFF);
+            }
+
+            rsp_length = ctx->backend->build_response_basis(&sft, rsp);
+            rsp[rsp_length++] = record_len * 2 + 8; // data len
+            rsp[rsp_length++] = 6; // reference type
+            rsp[rsp_length++] = address >> 8; // file nb
+            rsp[rsp_length++] = address & 0xFF;
+            rsp[rsp_length++] = record_addr >> 8; // record nb
+            rsp[rsp_length++] = record_addr & 0xFF;
+            rsp[rsp_length++] = record_len >> 8; // record len
+            rsp[rsp_length++] = record_len & 0xFF;
+
+            for (i = 0; i < record_len; i++) {
+                rsp[rsp_length++] = mb_mapping->files[mapping_address].records[record_addr][i] >> 8;
+                rsp[rsp_length++] = mb_mapping->files[mapping_address].records[record_addr][i] & 0xFF;
+            }
+        }
+    }
     default:
         rsp_length = response_exception(
             ctx, &sft, MODBUS_EXCEPTION_ILLEGAL_FUNCTION, rsp, TRUE,
